@@ -389,3 +389,74 @@ cat("   - Score > 5: The fluctuation is statistically prominent and\n")
 cat("     distinguishable from technical or compositional noise.\n")
 cat(sprintf("   [Current Max Score: %.4f]\n", m_val))
 cat("==========================================================\n")
+
+# =================================================================
+# ADVANCED INVARIANT REFERENCE SELECTION: PURITY INDEX (PI)
+# Based on Ohta (2011) with enhanced interpretability
+# =================================================================
+
+# 1. Purity Index Calculation Logic
+# PI measures how "universally stable" a taxon is against ALL other taxa.
+# High PI = This taxon maintains a stable ratio with the majority of the community,
+#          suggesting it is not part of a specific moving cluster (Co-variation).
+
+n_taxa <- ncol(data)
+purity_scores <- numeric(n_taxa)
+names(purity_scores) <- taxa_names
+
+# Matrix to store pairwise VLR (Log-Ratio Variance)
+vlr_matrix <- var(log_data)
+diag_vec <- diag(vlr_matrix)
+vlr_dist <- outer(diag_vec, diag_vec, "+") - 2 * vlr_matrix
+
+for (i in 1:n_taxa) {
+  # Calculate VLRs of Taxon i against all other taxa
+  ratios_vlr <- vlr_dist[i, -i]
+  
+  # PI Definition: The inverse of the median VLR against the community.
+  # We use Median to be robust against outliers (taxa that are actually moving).
+  purity_scores[i] <- 1 / (median(ratios_vlr) + 1e-6)
+}
+
+# 2. Ranking and Selection with Purity
+# Normalize PI for interpretation (0 to 100 scale)
+purity_norm <- (purity_scores / max(purity_scores)) * 100
+
+# Merge with previous CV-Asymmetry (Ohta's Win Count)
+final_purity_report <- data.frame(
+  Taxon = taxa_names,
+  Purity_Index = round(purity_norm, 2),
+  Ohta_Win_Count = as.numeric(win_counts),
+  Self_Variance = round(diag_vec, 4)
+)
+
+# Sorting by Purity (Primary) and Ohta's Logic (Secondary)
+final_purity_report <- final_purity_report[order(-final_purity_report$Purity_Index), ]
+
+# 3. Visualization: The "Sweet Spot" for Reference Selection
+dev.new(width=10, height=7)
+par(mar=c(5,5,4,2))
+plot(final_purity_report$Ohta_Win_Count, final_purity_report$Purity_Index,
+     pch=21, bg=rgb(0.2, 0.4, 0.8, 0.6), cex=2,
+     xlab="Ohta's CV-Asymmetry Score (Win Count)",
+     ylab="Purity Index (Universal Stability %)",
+     main="Invariant Reference Diagnostic: Purity vs. Asymmetry")
+
+# Annotate Top Candidates
+top_n <- 5
+text(final_purity_report$Ohta_Win_Count[1:top_n], 
+     final_purity_report$Purity_Index[1:top_n], 
+     labels=final_purity_report$Taxon[1:top_n], 
+     pos=3, cex=0.8, font=2)
+
+grid()
+
+# 4. Final Selection Strategy
+best_ref <- as.character(final_purity_report$Taxon[1])
+
+cat("\n--- PURITY-BASED REFERENCE REPORT ---\n")
+print(head(final_purity_report, 10))
+cat(sprintf("\nSELECTED ANCHOR: [%s]\n", best_ref))
+cat(sprintf("REASON: This taxon shows the highest 'Purity Index' (%.1f%%),\n", final_purity_report$Purity_Index[1]))
+cat("meaning it remains stable relative to the widest range of other taxa.\n")
+cat("=====================================\n")
