@@ -513,3 +513,61 @@ target_taxa <- taxa_names[taxa_names != ref_name]
 final_log_ratios <- log(data[, target_taxa] / data[, ref_name])
 
 cat(sprintf("\nSUCCESS: Dataset transformed via ALR using [%s].\n", ref_name))
+
+# =================================================================
+# FINAL STEP: ROBUSTNESS SCORE CALCULATION
+# Using Validated Noise Anchor as a Pseudo-Internal Standard
+# =================================================================
+
+# 1. Calculate Log-Ratios against the Validated Noise Anchor
+# (ref_name should be the 'Noise-Level Invariant' identified previously)
+target_taxa <- taxa_names[taxa_names != ref_name]
+alr_matrix <- log(data[, target_taxa] / data[, ref_name])
+
+# 2. Robustness Score (Signal-to-Noise Ratio)
+# Median Shift (Signal) / Standard Deviation (Background Noise)
+# We add a small constant (0.01) to prevent inflation by near-zero SD.
+shift_median <- apply(alr_matrix, 2, function(x) median(x - median(x)))
+shift_sd     <- apply(alr_matrix, 2, sd)
+robust_scores <- abs(shift_median) / (shift_sd + 0.01)
+
+# 3. Comprehensive Final Report
+final_results <- data.frame(
+  Taxon = target_taxa,
+  Median_Shift = round(shift_median, 4),
+  Dispersion_SD = round(shift_sd, 4),
+  Robustness_Score = round(robust_scores, 4)
+)
+
+# Sorting by the most "Certain" fluctuations
+final_results <- final_results[order(-final_results$Robustness_Score), ]
+
+cat("\n==========================================================\n")
+cat("          FINAL ROBUSTNESS ANALYSIS (ALR-BASED)           \n")
+cat("==========================================================\n")
+cat(sprintf("Denominator (Reference): %s [NOISE ANCHOR]\n", ref_name))
+cat("Top 10 Most Robust Fluctuants (High S/N Ratio):\n")
+print(head(final_results, 10))
+cat("----------------------------------------------------------\n")
+
+# 4. Identification of Significant Samples
+# Find samples where the fluctuation exceeds the threshold
+threshold <- 3.0 # Standard "Statistical Prominence" threshold
+sig_hits <- which(abs(alr_matrix) > threshold * median(shift_sd), arr.ind = TRUE)
+
+if(nrow(sig_hits) > 0) {
+  cat(sprintf("DETECTED: %d significant sample-taxon deviations.\n", nrow(sig_hits)))
+} else {
+  cat("NOTICE: No deviations exceeded the robust threshold.\n")
+}
+cat("==========================================================\n")
+
+# 5. Visual Summary (Boxplot of top candidates)
+top_candidates <- as.character(final_results$Taxon[1:min(6, length(target_taxa))])
+dev.new(width=12, height=8)
+par(mfrow=c(2,3), mar=c(4,5,4,2))
+for(taxon in top_candidates) {
+  boxplot(alr_matrix[, taxon], main=taxon, ylab="Log-Ratio (vs Noise Ref)", 
+          col="lightblue", border="darkblue")
+  abline(h=0, col="red", lty=2)
+}
