@@ -1,5 +1,5 @@
 # =================================================================
-# Identification of Invariant References and moving components
+# Identification of Invariant References and moving Components
 # Methodology: VLR (Log-Ratio Variance) + CV Asymmetry Analysis
 # Features: Red Marker, Viridis Heatmap, Explicit Sample Extraction
 # Engine: Pure Base R (No External Libraries)
@@ -285,58 +285,6 @@ cat(sprintf("STABILITY SCORE : %.1f%%\n", max(initial_ref_pct, top_ref_pct)))
 cat(sprintf("TOP FLUCTUANT   : %s (Max Robustness: %.4f)\n", m_taxon_name, m_val))
 
 # =================================================================
-# 6.2 UPDATED VISUALIZATION (Annotated for Bootstrap Selection)
-# =================================================================
-
-if (use_bootstrap_mode) {
-  cat("\n[RE-PLOTTING] Reference has changed. Generating updated visualizations...\n")
-  
-  # --- [UPDATED WINDOW 3] Robustness Heatmap with Bootstrap Annotation ---
-  dev.new(width=12, height=7); layout(matrix(1:2, 1, 2), widths=c(0.85, 0.15))
-  par(mar = c(7, 12, 6, 1)) # Increased top margin for subtitles
-  
-  top_h_new <- rownames(confidence_score)[order(apply(confidence_score, 1, max), decreasing=T)[1:min(10, n_targets)]]
-  plot_h_new <- confidence_score[top_h_new, , drop=FALSE]
-  
-  image(1:n_samples, 1:nrow(plot_h_new), t(log1p(plot_h_new)), col=viridis_pal, axes=F)
-  
-  # Main Title & Bootstrap Annotation
-  title(main=paste("UPDATED Heatmap | Ref:", ref_taxon_name), line=3)
-  mtext(sprintf("Denominator selected via Bootstrap Mode (Stability: %.1f%%)", top_ref_pct), 
-        side=3, line=1, cex=0.9, col="darkblue", font=3)
-  
-  axis(1, at=1:n_samples, labels=sample_names, las=2, cex.axis=0.8)
-  axis(2, at=1:nrow(plot_h_new), labels=rownames(plot_h_new), las=1, cex.axis=0.8)
-  
-  # Add RED MARKER
-  m_row_match <- match(m_taxon_name, rownames(plot_h_new))
-  if(!is.na(m_row_match)) points(m_sample_idx, m_row_match, pch=4, col="red", lwd=3, cex=2)
-  
-  # Color scale
-  par(mar = c(7, 1, 6, 4)); zs <- seq(0, max(log1p(plot_h_new)), length.out=100)
-  image(1, zs, matrix(zs, 1), col=viridis_pal, axes=F); axis(4, las=1); mtext("log(Score+1)", 4, 2.5, cex=0.7)
-
-  # --- [UPDATED WINDOW 4] Robust Trends with Bootstrap Annotation ---
-  dev.new(width=12, height=10); par(mfrow=c(3,2), mar=c(4,5,6,2))
-  for(i in 1:min(6, length(top_h_new))) {
-    tn <- top_h_new[i]; y_med <- trend_median[tn, ]; y_sd <- trend_sd[tn, ]
-    plot(y_med, type="n", ylim=range(c(y_med+y_sd, y_med-y_sd, 0)), 
-         main=paste("Target:", tn), xlab="Sample", ylab="Log-Ratio Shift")
-    
-    # Bootstrap Specific Subtitle
-    mtext(paste("Ref Denominator:", ref_taxon_name, "(Bootstrap Mode)"), 
-          side=3, line=0.3, cex=0.7, col="darkblue")
-    
-    polygon(c(1:n_samples, n_samples:1), c(y_med+y_sd, rev(y_med-y_sd)), col=rgb(0.2, 0.4, 0.8, 0.15), border=NA)
-    abline(h=0, lty=2, col="red"); lines(y_med, type="b", pch=19, col="#2c3e50", lwd=2)
-  }
-  
-  cat("SUCCESS: Updated plots with Bootstrap annotations generated.\n")
-} else {
-  cat("\n[INFO] Reference remains unchanged. Original plots are still valid.\n")
-}
-
-# =================================================================
 # FINAL VALIDATION CHECKLIST (Reporting Guidelines)
 # =================================================================
 cat("\n==========================================================\n")
@@ -462,112 +410,224 @@ cat("meaning it remains stable relative to the widest range of other taxa.\n")
 cat("=====================================\n")
 
 # =================================================================
-# INVARIANT REFERENCE ANALYSIS: NOISE-VALIDATED ANCHOR SELECTION
-# Rationale: Even low-abundance noise is a valid reference if invariant.
+# FINAL INTEGRATED ANALYSIS: INVARIANT ANCHOR & ROBUSTNESS REPORT
 # =================================================================
 
-# 1. Parameter Setup
-# Define "Noise Zone" (e.g., bottom 15% of mean abundance)
-abundance_threshold <- quantile(colMeans(data), 0.15)
+# --- 1. Diagnostic & Classification (Noise vs Biological) ---
+# Define Noise Zone (bottom 15%)
+noise_cutoff <- quantile(colMeans(data), 0.15)
 
-# 2. Reference Selection with Noise Diagnostics
-n_taxa <- ncol(data)
-ref_diagnostics <- data.frame(
-  Taxon = taxa_names,
-  Mean_Abund = colMeans(data),
-  VLR_Stability = 1 / (apply(vlr_dist, 1, median) + 1e-6) # Purity Logic
+# Build Diagnostic Matrix
+# Purity: Stability against the entire community
+# Ohta_Win: Pairwise CV-asymmetry superiority
+diagnostic_df <- data.frame(
+  Taxon          = taxa_names,
+  Mean_Abund     = colMeans(data),
+  Stability      = purity_norm, 
+  Ohta_Win_Count = as.numeric(win_counts),
+  Type           = ifelse(colMeans(data) < noise_cutoff, "NOISE", "BIOLOGICAL")
 )
 
-# Identify the absolute most stable component
-best_idx <- which.max(ref_diagnostics$VLR_Stability)
-ref_name <- taxa_names[best_idx]
-ref_mean <- ref_diagnostics$Mean_Abund[best_idx]
-is_noise <- ref_mean < abundance_threshold
+# Composite Selection Score (Sum of Ranks)
+diagnostic_df$Selection_Score <- rank(diagnostic_df$Stability) + rank(diagnostic_df$Ohta_Win_Count)
+diagnostic_df <- diagnostic_df[order(-diagnostic_df$Selection_Score), ]
 
-# 3. Execution of Robustness Report
-cat("\n==========================================================\n")
-cat("          INVARIANT REFERENCE DIAGNOSTIC REPORT           \n")
-cat("==========================================================\n")
-cat(sprintf("Selected Reference : %s\n", ref_name))
-cat(sprintf("Mean Abundance     : %.6f\n", ref_mean))
-cat(sprintf("Stability Rank     : 1 / %d taxa\n", n_taxa))
-cat("----------------------------------------------------------\n")
+# --- 2. Final Decision Logic for Optimal Anchor ---
+best_anchor <- diagnostic_df[1, ]
+anchor_name <- as.character(best_anchor$Taxon)
+anchor_type <- best_anchor$Type
 
-if (is_noise) {
-  cat("STATUS: [NOISE-LEVEL INVARIANT]\n")
-  cat("REASONING: This component resides in the low-abundance noise zone.\n")
-  cat("           However, its log-ratio variance (VLR) is the lowest\n")
-  cat("           across the entire dataset. In compositionality logic,\n")
-  cat("           this 'stable noise' functions as a superior pseudo-internal\n")
-  cat("           standard, effectively canceling out compositional bias.\n")
-  cat("VALIDATION: High mathematical reliability as a constant anchor.\n")
-} else {
-  cat("STATUS: [BIOLOGICAL-LEVEL INVARIANT]\n")
-  cat("REASONING: Selected reference is a major component with high stability.\n")
-}
-cat("==========================================================\n")
+# --- 3. EXECUTION: ALR Transformation & Robustness Calculation ---
+target_taxa <- taxa_names[taxa_names != anchor_name]
+alr_matrix  <- log(data[, target_taxa] / data[, anchor_name])
 
-# 4. Final ALR Transformation using the "Validated Noise Anchor"
-# (Applying the shift calculation for all other targets)
-target_taxa <- taxa_names[taxa_names != ref_name]
-final_log_ratios <- log(data[, target_taxa] / data[, ref_name])
-
-cat(sprintf("\nSUCCESS: Dataset transformed via ALR using [%s].\n", ref_name))
-
-# =================================================================
-# FINAL STEP: ROBUSTNESS SCORE CALCULATION
-# Using Validated Noise Anchor as a Pseudo-Internal Standard
-# =================================================================
-
-# 1. Calculate Log-Ratios against the Validated Noise Anchor
-# (ref_name should be the 'Noise-Level Invariant' identified previously)
-target_taxa <- taxa_names[taxa_names != ref_name]
-alr_matrix <- log(data[, target_taxa] / data[, ref_name])
-
-# 2. Robustness Score (Signal-to-Noise Ratio)
-# Median Shift (Signal) / Standard Deviation (Background Noise)
-# We add a small constant (0.01) to prevent inflation by near-zero SD.
-shift_median <- apply(alr_matrix, 2, function(x) median(x - median(x)))
-shift_sd     <- apply(alr_matrix, 2, sd)
+# Robustness Score (Signal-to-Noise Ratio)
+# Calculated as: |Median Shift| / (Standard Deviation + epsilon)
+shift_median  <- apply(alr_matrix, 2, function(x) median(x - median(x)))
+shift_sd      <- apply(alr_matrix, 2, sd)
 robust_scores <- abs(shift_median) / (shift_sd + 0.01)
 
-# 3. Comprehensive Final Report
 final_results <- data.frame(
-  Taxon = target_taxa,
-  Median_Shift = round(shift_median, 4),
-  Dispersion_SD = round(shift_sd, 4),
-  Robustness_Score = round(robust_scores, 4)
+  Taxon            = target_taxa,
+  Robustness_Score = round(robust_scores, 4),
+  Median_Shift     = round(shift_median, 4),
+  Dispersion_SD    = round(shift_sd, 4),
+  Mean_Abundance   = round(colMeans(data[, target_taxa]), 6)
 )
-
-# Sorting by the most "Certain" fluctuations
 final_results <- final_results[order(-final_results$Robustness_Score), ]
 
+# =================================================================
+# FULL ANALYTICAL REPORT (NO OMISSION)
+# =================================================================
+
+# REPORT 1: Anchor Selection Details
 cat("\n==========================================================\n")
-cat("          FINAL ROBUSTNESS ANALYSIS (ALR-BASED)           \n")
+cat("      PHASE 1: OPTIMAL INVARIANT ANCHOR SELECTION         \n")
 cat("==========================================================\n")
-cat(sprintf("Denominator (Reference): %s [NOISE ANCHOR]\n", ref_name))
-cat("Top 10 Most Robust Fluctuants (High S/N Ratio):\n")
-print(head(final_results, 10))
+cat(sprintf("SELECTED ANCHOR : %s\n", anchor_name))
+cat(sprintf("STABILITY SCORE : %.1f / 100\n", best_anchor$Stability))
+cat(sprintf("MEAN ABUNDANCE  : %.6e\n", best_anchor$Mean_Abund))
+cat(sprintf("CLASSIFICATION  : [%s]\n", anchor_type))
 cat("----------------------------------------------------------\n")
 
-# 4. Identification of Significant Samples
-# Find samples where the fluctuation exceeds the threshold
-threshold <- 3.0 # Standard "Statistical Prominence" threshold
-sig_hits <- which(abs(alr_matrix) > threshold * median(shift_sd), arr.ind = TRUE)
-
-if(nrow(sig_hits) > 0) {
-  cat(sprintf("DETECTED: %d significant sample-taxon deviations.\n", nrow(sig_hits)))
+if (anchor_type == "NOISE") {
+  cat("RATIONALE: This noise-level component is the most invariant anchor.\n")
+  cat("           It functions as a 'Stable Zero-Point' to cancel bias.\n")
 } else {
-  cat("NOTICE: No deviations exceeded the robust threshold.\n")
+  cat("RATIONALE: This biological component serves as a 'Housekeeping' anchor,\n")
+  cat("           remaining stable relative to the entire community.\n")
+}
+
+# REPORT 2: Stability Ranking Top 10
+cat("\n--- STABILITY RANKING (Top 10) ---\n")
+print(head(diagnostic_df[, c("Taxon", "Type", "Stability", "Mean_Abund")], 10))
+
+# REPORT 3: Robustness Analysis Results
+cat("\n==========================================================\n")
+cat("      PHASE 2: ROBUSTNESS ANALYSIS (ALR-BASED)            \n")
+cat("==========================================================\n")
+cat(sprintf("Reference Denominator: %s [%s]\n", anchor_name, anchor_type))
+cat("Top 10 Most Certain Fluctuants (High S/N Ratio):\n")
+print(head(final_results, 10))
+
+# REPORT 4: Significant Deviations Detection
+threshold <- 3.0
+sig_hits <- which(abs(alr_matrix) > threshold * median(shift_sd), arr.ind = TRUE)
+cat("----------------------------------------------------------\n")
+if(nrow(sig_hits) > 0) {
+  cat(sprintf("RESULT: Detected %d significant sample-taxon deviations.\n", nrow(sig_hits)))
+} else {
+  cat("RESULT: No deviations exceeded the robustness threshold.\n")
 }
 cat("==========================================================\n")
 
-# 5. Visual Summary (Boxplot of top candidates)
+# --- 4. Visual Summary ---
 top_candidates <- as.character(final_results$Taxon[1:min(6, length(target_taxa))])
-dev.new(width=12, height=8)
-par(mfrow=c(2,3), mar=c(4,5,4,2))
+dev.new(width=12, height=8); par(mfrow=c(2,3), mar=c(4,5,4,2))
 for(taxon in top_candidates) {
-  boxplot(alr_matrix[, taxon], main=taxon, ylab="Log-Ratio (vs Noise Ref)", 
-          col="lightblue", border="darkblue")
+  boxplot(alr_matrix[, taxon], main=paste("Target:", taxon), 
+          ylab="Log-Ratio vs Anchor", col="#3498db", border="#2c3e50")
   abline(h=0, col="red", lty=2)
 }
+
+# =================================================================
+# FINAL INTEGRATED ANALYSIS: INVARIANT ANCHOR & ROBUSTNESS VISUALS
+# =================================================================
+
+# --- 1. Diagnostic & Classification (Noise vs Biological) ---
+# Define Noise Zone (bottom 15% of mean abundance)
+noise_cutoff <- quantile(colMeans(data), 0.15)
+
+# Build Diagnostic Matrix
+# Purity: Global stability against the entire community
+# Ohta_Win: Pairwise CV-asymmetry superiority (Ohta 2011)
+diagnostic_df <- data.frame(
+  Taxon          = taxa_names,
+  Mean_Abund     = colMeans(data),
+  Stability      = purity_norm, 
+  Ohta_Win_Count = as.numeric(win_counts),
+  Type           = ifelse(colMeans(data) < noise_cutoff, "NOISE", "BIOLOGICAL")
+)
+
+# Composite Selection Score (Rank Sum)
+diagnostic_df$Selection_Score <- rank(diagnostic_df$Stability) + rank(diagnostic_df$Ohta_Win_Count)
+diagnostic_df <- diagnostic_df[order(-diagnostic_df$Selection_Score), ]
+
+# --- 2. Final Decision Logic for Optimal Anchor ---
+best_anchor <- diagnostic_df[1, ]
+anchor_name <- as.character(best_anchor$Taxon)
+anchor_type <- best_anchor$Type
+
+# --- 3. Execution: ALR Transformation & Robustness Calculation ---
+target_taxa <- taxa_names[taxa_names != anchor_name]
+alr_matrix  <- log(data[, target_taxa] / data[, anchor_name])
+
+# Robustness Score (Signal-to-Noise Ratio)
+shift_median  <- apply(alr_matrix, 2, function(x) median(x - median(x)))
+shift_sd      <- apply(alr_matrix, 2, sd)
+robust_scores <- abs(shift_median) / (shift_sd + 0.01)
+
+final_results <- data.frame(
+  Taxon            = target_taxa,
+  Robustness_Score = round(robust_scores, 4),
+  Median_Shift     = round(shift_median, 4),
+  Dispersion_SD    = round(shift_sd, 4),
+  Mean_Abundance   = round(colMeans(data[, target_taxa]), 6)
+)
+final_results <- final_results[order(-final_results$Robustness_Score), ]
+
+# =================================================================
+# FULL ANALYTICAL REPORT
+# =================================================================
+cat("\n==========================================================\n")
+cat("      PHASE 1: OPTIMAL INVARIANT ANCHOR SELECTION         \n")
+cat("==========================================================\n")
+cat(sprintf("SELECTED ANCHOR : %s\n", anchor_name))
+cat(sprintf("STABILITY SCORE : %.1f / 100\n", best_anchor$Stability))
+cat(sprintf("MEAN ABUNDANCE  : %.6e\n", best_anchor$Mean_Abund))
+cat(sprintf("CLASSIFICATION  : [%s]\n", anchor_type))
+cat("----------------------------------------------------------\n")
+
+if (anchor_type == "NOISE") {
+  cat("RATIONALE: This noise-level component is the most invariant anchor.\n")
+  cat("           It functions as a 'Stable Zero-Point' to cancel bias.\n")
+} else {
+  cat("RATIONALE: This biological component serves as a 'Housekeeping' anchor,\n")
+  cat("           remaining stable relative to the entire community.\n")
+}
+
+cat("\n--- STABILITY RANKING (Top 10) ---\n")
+print(head(diagnostic_df[, c("Taxon", "Type", "Stability", "Mean_Abund")], 10))
+
+# =================================================================
+# [WINDOW 3] ROBUSTNESS HEATMAP (Purity-Validated)
+# =================================================================
+dev.new(width=12, height=7); layout(matrix(1:2, 1, 2), widths=c(0.85, 0.15))
+par(mar = c(7, 12, 6, 1))
+
+top_h_taxa <- as.character(final_results$Taxon[1:min(10, nrow(final_results))])
+plot_matrix <- t(abs(alr_matrix[, top_h_taxa]))
+
+viridis_pal <- colorRampPalette(c("#440154", "#3b528b", "#21908c", "#5dc963", "#fde725"))(100)
+image(1:n_samples, 1:nrow(plot_matrix), t(log1p(plot_matrix)), col=viridis_pal, axes=F)
+
+title(main=paste("Robustness Heatmap | Anchor:", anchor_name), line=3)
+mtext(sprintf("Type: [%s] | Stability Score: %.1f%%", anchor_type, best_anchor$Stability), 
+      side=3, line=1, cex=0.9, col="darkred", font=2)
+
+axis(1, at=1:n_samples, labels=sample_names, las=2, cex.axis=0.8)
+axis(2, at=1:nrow(plot_matrix), labels=rownames(plot_matrix), las=1, cex.axis=0.8)
+
+# Highlight Maximum Deviation
+max_loc <- which(plot_matrix == max(plot_matrix), arr.ind = TRUE)[1,]
+points(max_loc[2], max_loc[1], pch=4, col="white", lwd=3, cex=2)
+
+par(mar = c(7, 1, 6, 4)); zs <- seq(0, max(log1p(plot_matrix)), length.out=100)
+image(1, zs, matrix(zs, 1), col=viridis_pal, axes=F); axis(4, las=1); mtext("log(|Shift|+1)", 4, 2.5, cex=0.7)
+
+# =================================================================
+# [WINDOW 4] ROBUST TRENDS (Relative to Optimal Anchor)
+# =================================================================
+dev.new(width=12, height=10); par(mfrow=c(3,2), mar=c(4,5,6,2))
+
+for(i in 1:min(6, length(top_h_taxa))) {
+  tn <- top_h_taxa[i]
+  y_val <- alr_matrix[, tn]
+  y_med <- median(y_val)
+  y_sd  <- sd(y_val)
+  
+  plot(y_val, type="b", pch=19, col="#2c3e50", lwd=2,
+       main=paste("Target:", tn), xlab="Sample Index", ylab="Log-Ratio Shift")
+  
+  mtext(paste("Ref Anchor:", anchor_name, "[", anchor_type, "]"), 
+        side=3, line=0.3, cex=0.7, col="blue")
+  
+  # SD Band represents background fluctuation relative to the anchor
+  polygon(c(1:n_samples, n_samples:1), 
+          c(rep(y_med + y_sd, n_samples), rep(y_med - y_sd, n_samples)), 
+          col=rgb(0.2, 0.4, 0.8, 0.1), border=NA)
+  
+  abline(h=0, lty=2, col="red")
+}
+
+cat("\nSUCCESS: All visualizations (Fig 3 & 4) and Robustness Reports generated.\n")
