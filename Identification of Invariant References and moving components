@@ -685,3 +685,57 @@ if (invariance_ratio < 1.0) {
   cat("           relatively stable, it still possesses internal dynamics.\n")
 }
 cat("==========================================================\n")
+
+# --- 0. Data Alignment & Variable Assignment ---
+current_sample_names <- rownames(data)
+if(is.null(current_sample_names)) current_sample_names <- paste0("S", 1:nrow(data))
+
+anchor_relative_abund <- data[, anchor_name]
+baseline_anchor_val <- anchor_relative_abund[1]
+
+# --- 1. Calculate Scaling Factor (Total Load) ---
+total_load_scaling <- baseline_anchor_val / anchor_relative_abund
+reliability_score <- 100 / (1 + (invariance_ratio / 1)) # Based on IR=15.28
+
+# --- 2. Numerical Summary Table ---
+total_load_summary <- data.frame(
+  Sample_Name      = current_sample_names,
+  Anchor_Rel_Pct   = round(anchor_relative_abund * 100, 4),
+  Scaling_Factor   = round(total_load_scaling, 4),
+  Log2_Total_Shift = round(log2(total_load_scaling), 4)
+)
+
+# --- 3. OUTPUT: Numerical Report & Reliability ---
+cat("\n==========================================================\n")
+cat("      ESTIMATED TOTAL BIOMASS SCALING (NUMERICAL)         \n")
+cat("==========================================================\n")
+print(total_load_summary)
+cat("----------------------------------------------------------\n")
+cat(sprintf("MEAN SCALING FACTOR: %.4f\n", mean(total_load_scaling)))
+cat(sprintf("MAX/MIN VARIATION  : %.4f x\n", max(total_load_scaling) / min(total_load_scaling)))
+cat(sprintf("RELIABILITY (IR=%.2f): %.1f / 100\n", invariance_ratio, reliability_score))
+cat("==========================================================\n")
+
+# --- 4. VISUALIZATION: Total Load Variation ---
+dev.new(width=12, height=6)
+par(mar=c(6, 5, 5, 2))
+
+# Color palette: Green for growth, Red for decline relative to baseline
+colors <- ifelse(total_load_scaling >= 1, "#2ecc71", "#e74c3c")
+
+bp <- barplot(total_load_scaling, names.arg=current_sample_names, 
+              col=colors, border="#2c3e50", las=2, cex.names=0.8,
+              main=paste("Estimated Total Biomass Scaling\nAnchor:", anchor_name, "(IR:", round(invariance_ratio, 2), ")"),
+              ylab="Total Load Scaling Factor (vs Baseline)",
+              ylim=c(0, max(total_load_scaling) * 1.2))
+
+# Add baseline indicator
+abline(h=1, col="blue", lwd=2, lty=2)
+text(x=0, y=1.05, "Baseline (1.0x)", col="blue", pos=4, cex=0.8)
+
+# Add value labels on top of bars
+text(x=bp, y=total_load_scaling, labels=round(total_load_scaling, 2), pos=3, cex=0.7)
+
+grid(nx=NA, ny=NULL, col="gray", lty="dotted")
+
+cat("\nSUCCESS: Numerical report and visualization generated.\n")
