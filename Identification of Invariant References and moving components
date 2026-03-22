@@ -768,3 +768,56 @@ bp <- barplot(total_load_scaling, names.arg=current_sample_names,
               ylim=c(0, max(total_load_scaling) * 1.2))
 abline(h=1, col="blue", lwd=2, lty=2); grid(nx=NA, ny=NULL, col="gray", lty="dotted")
 text(bp, total_load_scaling, round(total_load_scaling, 2), pos=3, cex=0.7)
+
+# =================================================================
+# GLOBAL INVARIANCE RATIO (IR) MAPPING
+# Goal: Categorize ALL taxa into 'Biological' vs 'Physical Noise'
+# =================================================================
+
+# 1. Calculate Theoretical Floor for ALL taxa
+# Var(log(C)) approx 1/Mean(C)
+mean_counts_all <- colMeans(data)
+theoretical_floor_all <- 1 / (mean_counts_all + 1e-6)
+
+# 2. Calculate Actual Observed Variance (Log-space)
+observed_var_all <- diag(var(log(data)))
+
+# 3. Compute Invariance Ratio (IR) for all components
+ir_all <- observed_var_all / theoretical_floor_all
+
+# 4. Create the Global Map Dataframe
+ir_mapping <- data.frame(
+  Taxon = taxa_names,
+  Mean_Abundance = round(mean_counts_all, 6),
+  Observed_Var = round(observed_var_all, 6),
+  Poisson_Floor = round(theoretical_floor_all, 6),
+  IR = round(ir_all, 4)
+)
+
+# Categorize based on Physical Limits
+ir_mapping$Status <- cut(ir_mapping$IR, 
+                         breaks = c(-Inf, 1.0, 2.5, 10.0, Inf),
+                         labels = c("Ultra-Stable (Fixed)", "Physical Noise", "Practical Invariant", "Biological Signal"))
+
+# Sort by IR (From most static to most dynamic)
+ir_mapping <- ir_mapping[order(ir_mapping$IR), ]
+
+# 5. Output Report: The Physics of Your Matrix
+cat("\n==========================================================\n")
+cat("          GLOBAL INVARIANCE RATIO (IR) REPORT             \n")
+cat("==========================================================\n")
+print(head(ir_mapping, 20)) # Top 20 most stable
+cat("----------------------------------------------------------\n")
+cat("SUMMARY OF MATRIX DYNAMICS:\n")
+print(table(ir_mapping$Status))
+cat("==========================================================\n")
+
+# 6. Visualization: Variance vs. Mean (The "Floor" Plot)
+dev.new(width=10, height=7)
+plot(mean_counts_all, observed_var_all, log="xy", pch=21, bg="gray",
+     xlab="Mean Abundance (Counts)", ylab="Observed Variance (Log-scale)",
+     main="Global Invariance Map: Observed vs. Theoretical Floor")
+# Add the Theoretical Poisson Floor Line
+curve(1/x, add=TRUE, col="red", lwd=2, lty=2)
+legend("topright", legend=c("Taxa", "Poisson Floor (IR=1)"), 
+       pch=c(21, NA), lty=c(NA, 2), col=c("black", "red"))
