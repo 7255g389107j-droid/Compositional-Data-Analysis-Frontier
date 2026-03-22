@@ -1,0 +1,152 @@
+# =================================================================
+# Identification of Invariant References and moving components
+# Methodology: VLR (Log-Ratio Variance) + CV Asymmetry Analysis
+# Features: Red Marker, Viridis Heatmap, Explicit Sample Extraction
+# Engine: Pure Base R (No External Libraries)
+# =================================================================
+
+# --- 1. User Configuration & Data Cleaning ---
+# Dataset: Rows = Samples, Columns = Taxa. 
+# Must contain only numeric abundance data.
+ds_input <- as.matrix(Dataset)
+min_abundance_threshold <- 0.00001  
+fixed_vlr_threshold <- 0.05      
+
+# Strict Filtering
+valid_taxa_mask <- apply(ds_input, 2, function(x) !any(is.na(x)) && min(x, na.rm = TRUE) >= min_abundance_threshold)
+data <- ds_input[, valid_taxa_mask]
+n_samples <- nrow(data); n_taxa <- ncol(data)
+taxa_names <- colnames(data); sample_names <- rownames(data)
+log_data <- log(data)
+
+cat(sprintf("--- Filtering Summary ---\nOriginal Taxa: %d | Retained Taxa: %d\nThreshold: %g\n", 
+            ncol(ds_input), n_taxa, min_abundance_threshold))
+
+# --- 2. Invariant Reference Identification (VLR & CV) ---
+cov_mat <- var(log_data); diag_vec <- diag(cov_mat)
+vlr_mat <- outer(diag_vec, diag_vec, "+") - 2 * cov_mat
+var_sum_mat <- outer(diag_vec, diag_vec, "+")
+
+win_counts <- numeric(n_taxa)
+for (j in 1:n_taxa) {
+  cv_j <- apply(data / data[, j], 2, function(x) sd(x) / mean(x))
+  cv_inv <- apply(sweep(1/data, 1, data[, j], "*"), 2, function(x) sd(x) / mean(x))
+  win_counts[j] <- sum(cv_j < cv_inv, na.rm = TRUE)
+}
+
+# --- 3. Reference Candidate Scoring ---
+vlr_flat <- vlr_mat; diag(vlr_flat) <- NA
+stable_pair_idx <- which(vlr_flat <= quantile(vlr_flat, 10/(n_taxa^2-n_taxa), na.rm=T), arr.ind=T)
+stable_taxa_pool <- unique(taxa_names[stable_pair_idx])
+
+combined_res <- data.frame(
+  Taxa = taxa_names, VLR_Value = diag_vec, VLR_Rank = rank(diag_vec),
+  Win_Count = as.numeric(win_counts), CV_Rank = rank(-win_counts),
+  Total_Score = rank(diag_vec) + rank(-win_counts),
+  In_Stable_Pair = taxa_names %in% stable_taxa_pool
+)
+combined_res <- combined_res[order(combined_res$Total_Score), ]
+
+# --- 4. Co-movement & Exclusion Analytics ---
+rho_mat <- 1 - (vlr_mat / var_sum_mat); neg_score_mat <- vlr_mat / var_sum_mat
+vlr_dynamic_cutoff <- quantile(vlr_mat[lower.tri(vlr_mat)], 0.01)
+
+# --- 5. Executing Robustness Analysis ---
+best_match <- combined_res[combined_res$In_Stable_Pair == TRUE, ]
+ref_taxon_name <- if(nrow(best_match) > 0) as.character(best_match$Taxa[1]) else as.character(combined_res$Taxa[1])
+
+cat(sprintf("\n=== Executing Robustness Analysis (Reference Denominator: %s) ===\n", ref_taxon_name))
+
+target_taxa <- taxa_names[taxa_names != ref_taxon_name]; n_targets <- length(target_taxa)
+trend_median <- matrix(NA, n_targets, n_samples)
+trend_sd     <- matrix(NA, n_targets, n_samples)
+rownames(trend_median) <- rownames(trend_sd) <- target_taxa
+
+for (i in 1:n_targets) {
+  alr_vec <- log(data[, target_taxa[i]] / data[, ref_taxon_name])
+  diff_mat <- outer(alr_vec, alr_vec, "-")
+  trend_median[i, ] <- apply(diff_mat, 1, median)
+  trend_sd[i, ]     <- apply(diff_mat, 1, sd)
+}
+confidence_score <- abs(trend_median) / (trend_sd + 0.01)
+
+# --- Extraction of Max Point ---
+m_val <- max(confidence_score)
+m_loc <- which(confidence_score == m_val, arr.ind = TRUE)[1, ]
+m_taxon_name <- rownames(confidence_score)[m_loc[1]]
+m_sample_idx <- as.numeric(m_loc[2])
+m_sample_name <- sample_names[m_sample_idx]
+
+# =================================================================
+# FULL ANALYTICAL REPORT (NO OMISSION)
+# =================================================================
+cat("\n=== [INVARIANT REFERENCE CANDIDATES (Top 10)] ===\n")
+print(head(combined_res, 10))
+
+cat(sprintf("\n=== Co-moving Taxa Pairs (Fixed Threshold: VLR <= %.4f) ===\n", fixed_vlr_threshold))
+f_idx <- which(vlr_mat <= fixed_vlr_threshold & lower.tri(vlr_mat), arr.ind = TRUE)
+if(nrow(f_idx) > 0) print(data.frame(Taxon_A=taxa_names[f_idx[,1]], Taxon_B=taxa_names[f_idx[,2]], VLR=vlr_mat[f_idx]))
+
+cat(sprintf("\n=== Co-moving Taxa Pairs (Dynamic Threshold: Bottom 1%%, VLR <= %.4f) ===\n", vlr_dynamic_cutoff))
+s_idx <- which(vlr_mat <= vlr_dynamic_cutoff & lower.tri(vlr_mat), arr.ind = TRUE)
+if(nrow(s_idx) > 0) print(data.frame(Taxon_A=taxa_names[s_idx[,1]], Taxon_B=taxa_names[s_idx[,2]], VLR=vlr_mat[s_idx], Rho_p=rho_mat[s_idx]))
+
+cat("\n=== Potential Negative Correlation Pairs (Top 10) ===\n")
+neg_idx <- which(neg_score_mat > 1.0 & lower.tri(neg_score_mat), arr.ind = TRUE)
+if(nrow(neg_idx) > 0) {
+  neg_list <- data.frame(Taxon_A=taxa_names[neg_idx[,1]], Taxon_B=taxa_names[neg_idx[,2]], VLR=vlr_mat[neg_idx], Exp_Var_Sum=var_sum_mat[neg_idx], Neg_Score=neg_score_mat[neg_idx])
+  print(head(neg_list[order(neg_list$Neg_Score, decreasing=T), ], 10))
+  
+  cat("\n=== Filtered Negative Correlation Pairs (Excluding low-variance noise) ===\n")
+  neg_list_filtered <- neg_list[neg_list$Exp_Var_Sum > quantile(diag_vec, 0.25), ]
+  print(head(neg_list_filtered[neg_list_filtered$Neg_Score > 1.0, ], 10))
+}
+
+significant_hits <- which(confidence_score > 5, arr.ind = TRUE)
+if(nrow(significant_hits) > 0) {
+  cat("\n=== Statistically Highly Robust Variations (Score > 5) === \n")
+  res_summary <- data.frame(Taxon = rownames(confidence_score)[significant_hits[,1]], Sample = sample_names[significant_hits[,2]], Score = confidence_score[significant_hits])
+  print(res_summary[order(res_summary$Score, decreasing = TRUE), ])
+} else {
+  cat("\nNo highly robust variations exceeding a score of 5 were found.\n")
+}
+
+# --- MANDATORY CONCLUSION (FIXED OUTPUT) ---
+cat("\n=== Final Conclusion (Robustness Analysis) ===\n")
+cat(paste0("Adopted Invariant Reference: ", ref_taxon_name, "\n"))
+cat(paste0("Taxon with most certain fluctuation (vs Ref): ", m_taxon_name, "\n"))
+cat(paste0("Sample with maximum confidence: ", m_sample_name, " (Index: ", m_sample_idx, ")\n"))
+
+# =================================================================
+# VISUALIZATION (4 WINDOWS)
+# =================================================================
+viridis_pal <- colorRampPalette(c("#440154", "#3b528b", "#21908c", "#5dc963", "#fde725"))(100)
+
+# [WINDOW 1] DIAGNOSTICS
+dev.new(width=12, height=5); par(mfrow = c(1, 3))
+hist(vlr_mat[lower.tri(vlr_mat)], 40, col="skyblue", main="VLR Dist"); hist(neg_score_mat[lower.tri(neg_score_mat)], 40, col="salmon", main="Exclusion"); abline(v=1, col="red", lty=2); hist(confidence_score, 40, col="#5dc963", main="Robustness")
+
+# [WINDOW 2] SCATTER
+dev.new(width=10, height=5); par(mfrow = c(1, 2))
+lp <- which(vlr_flat == min(vlr_flat, na.rm=T), arr.ind=T)[1,]; plot(log_data[,lp[1]], log_data[,lp[2]], pch=19, col="#3498db", main="Min VLR", xlab=taxa_names[lp[1]], ylab=taxa_names[lp[2]]); abline(lm(log_data[,lp[2]] ~ log_data[,lp[1]]), col="#e74c3c", lwd=2)
+hp <- which(neg_score_mat == max(neg_score_mat[lower.tri(neg_score_mat)], na.rm=T), arr.ind=T)[1,]; plot(log_data[,hp[1]], log_data[,hp[2]], pch=19, col="#e74c3c", main="Max Exclusion", xlab=taxa_names[hp[1]], ylab=taxa_names[hp[2]]); abline(lm(log_data[,hp[2]] ~ log_data[,hp[1]]), col="#3498db", lwd=2, lty=2)
+
+# [WINDOW 3] NATURE HEATMAP (VIRIDIS + RED MARKER)
+dev.new(width=12, height=7); layout(matrix(1:2, 1, 2), widths=c(0.85, 0.15)); par(mar = c(7, 12, 5, 1))
+top_h <- rownames(confidence_score)[order(apply(confidence_score, 1, max), decreasing=T)[1:min(10, n_targets)]]
+plot_h <- confidence_score[top_h, , drop=FALSE]
+image(1:n_samples, 1:nrow(plot_h), t(log1p(plot_h)), col=viridis_pal, axes=F, main=paste("Robustness Heatmap | Ref:", ref_taxon_name))
+axis(1, at=1:n_samples, labels=sample_names, las=2, cex.axis=0.8); axis(2, at=1:nrow(plot_h), labels=rownames(plot_h), las=1, cex.axis=0.8)
+# RED MARKER
+m_row_match <- match(m_taxon_name, rownames(plot_h))
+if(!is.na(m_row_match)) points(m_sample_idx, m_row_match, pch=4, col="red", lwd=3, cex=2)
+par(mar = c(7, 1, 5, 4)); zs <- seq(0, max(log1p(plot_h)), length.out=100); image(1, zs, matrix(zs, 1), col=viridis_pal, axes=F); axis(4, las=1); mtext("log(Score+1)", 4, 2.5, cex=0.7)
+
+# [WINDOW 4] ROBUST TRENDS
+dev.new(width=12, height=9); par(mfrow=c(3,2), mar=c(4,5,5,2))
+for(i in 1:min(6, length(top_h))) {
+  tn <- top_h[i]; y_med <- trend_median[tn, ]; y_sd <- trend_sd[tn, ]
+  plot(y_med, type="n", ylim=range(c(y_med+y_sd, y_med-y_sd, 0)), main=paste("Target:", tn, "\nRef Denom:", ref_taxon_name), xlab="Sample", ylab="Shift")
+  polygon(c(1:n_samples, n_samples:1), c(y_med+y_sd, rev(y_med-y_sd)), col=rgb(0.2, 0.4, 0.8, 0.15), border=NA)
+  abline(h=0, lty=2, col="red"); lines(y_med, type="b", pch=19, col="#2c3e50", lwd=2)
+}
