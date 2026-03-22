@@ -691,11 +691,11 @@ current_sample_names <- rownames(data)
 if(is.null(current_sample_names)) current_sample_names <- paste0("S", 1:nrow(data))
 
 anchor_relative_abund <- data[, anchor_name]
-baseline_anchor_val <- anchor_relative_abund[1]
+baseline_anchor_val <- anchor_relative_abund[1] # Reference point: Sample 1
 
 # --- 1. Calculate Scaling Factor (Total Load) ---
 total_load_scaling <- baseline_anchor_val / anchor_relative_abund
-reliability_score <- 100 / (1 + (invariance_ratio / 1)) # Based on IR=15.28
+reliability_score <- 100 / (1 + (invariance_ratio / 1)) # Normalized score for IR=15.28
 
 # --- 2. Numerical Summary Table ---
 total_load_summary <- data.frame(
@@ -705,7 +705,7 @@ total_load_summary <- data.frame(
   Log2_Total_Shift = round(log2(total_load_scaling), 4)
 )
 
-# --- 3. OUTPUT: Numerical Report & Reliability ---
+# --- 3. OUTPUT: Numerical Report ---
 cat("\n==========================================================\n")
 cat("      ESTIMATED TOTAL BIOMASS SCALING (NUMERICAL)         \n")
 cat("==========================================================\n")
@@ -713,29 +713,41 @@ print(total_load_summary)
 cat("----------------------------------------------------------\n")
 cat(sprintf("MEAN SCALING FACTOR: %.4f\n", mean(total_load_scaling)))
 cat(sprintf("MAX/MIN VARIATION  : %.4f x\n", max(total_load_scaling) / min(total_load_scaling)))
-cat(sprintf("RELIABILITY (IR=%.2f): %.1f / 100\n", invariance_ratio, reliability_score))
+
+# --- 4. RELIABILITY DIAGNOSTIC (The "Cold" Truth) ---
+cat("\n==========================================================\n")
+cat("             FINAL RELIABILITY DIAGNOSTIC                 \n")
+cat("==========================================================\n")
+cat(sprintf("SELECTED ANCHOR           : %s\n", anchor_name))
+cat(sprintf("INVARIANCE RATIO (IR)     : %.4f\n", invariance_ratio))
+cat(sprintf("PHYSICAL RELIABILITY SCORE: %.1f / 100\n", reliability_score))
+cat("----------------------------------------------------------\n")
+
+if (invariance_ratio < 1.0) {
+  cat("STATUS  : [ULTRA-STABLE]\n")
+  cat("INTERPRETATION: This anchor is as stable as a physical constant.\n")
+  cat("                Total load shifts are extremely accurate.\n")
+} else if (invariance_ratio < 10.0) {
+  cat("STATUS  : [RELIABLE]\n")
+  cat("INTERPRETATION: Good stability. Minor biological noise in anchor,\n")
+  cat("                but provides a robust trend for total biomass.\n")
+} else {
+  cat("STATUS  : [CAUTION - HIGH INTERNAL DYNAMICS]\n")
+  cat(sprintf("CRITIQUE: IR is %.2f. The 'Anchor' is NOT a fixed point.\n", invariance_ratio))
+  cat("          It fluctuates 15x more than pure sampling noise.\n")
+  cat("          This means the Anchor itself may be moving biologically.\n")
+  cat("          Scaling factors should be viewed as 'Relative Total Load'\n")
+  cat("          anchored to this specific taxon's baseline.\n")
+}
 cat("==========================================================\n")
 
-# --- 4. VISUALIZATION: Total Load Variation ---
-dev.new(width=12, height=6)
-par(mar=c(6, 5, 5, 2))
-
-# Color palette: Green for growth, Red for decline relative to baseline
+# --- 5. VISUALIZATION: Total Load Variation ---
+dev.new(width=12, height=6); par(mar=c(6, 5, 5, 2))
 colors <- ifelse(total_load_scaling >= 1, "#2ecc71", "#e74c3c")
-
 bp <- barplot(total_load_scaling, names.arg=current_sample_names, 
               col=colors, border="#2c3e50", las=2, cex.names=0.8,
-              main=paste("Estimated Total Biomass Scaling\nAnchor:", anchor_name, "(IR:", round(invariance_ratio, 2), ")"),
+              main=paste("Estimated Total Biomass Scaling (IR:", round(invariance_ratio, 2), ")"),
               ylab="Total Load Scaling Factor (vs Baseline)",
               ylim=c(0, max(total_load_scaling) * 1.2))
-
-# Add baseline indicator
 abline(h=1, col="blue", lwd=2, lty=2)
-text(x=0, y=1.05, "Baseline (1.0x)", col="blue", pos=4, cex=0.8)
-
-# Add value labels on top of bars
-text(x=bp, y=total_load_scaling, labels=round(total_load_scaling, 2), pos=3, cex=0.7)
-
-grid(nx=NA, ny=NULL, col="gray", lty="dotted")
-
-cat("\nSUCCESS: Numerical report and visualization generated.\n")
+text(bp, total_load_scaling, round(total_load_scaling, 2), pos=3, cex=0.7)
