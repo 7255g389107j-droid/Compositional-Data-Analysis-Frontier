@@ -494,3 +494,55 @@ cat("==========================================================\n")
 cat(sprintf("\nFINAL CHOICE    : %s\n", ref_taxon_name))
 cat(sprintf("STABILITY SCORE : %.1f%%\n", max(initial_ref_pct, top_ref_pct)))
 cat(sprintf("TOP FLUCTUANT   : %s (Max Robustness: %.4f)\n", m_taxon_name, m_val))
+
+# =================================================================
+# 6.2 UPDATED VISUALIZATION (Annotated for Bootstrap Selection)
+# =================================================================
+
+if (use_bootstrap_mode) {
+  cat("\n[RE-PLOTTING] Reference has changed. Generating updated visualizations...\n")
+  
+  # --- [UPDATED WINDOW 3] Robustness Heatmap with Bootstrap Annotation ---
+  dev.new(width=12, height=7); layout(matrix(1:2, 1, 2), widths=c(0.85, 0.15))
+  par(mar = c(7, 12, 6, 1)) # Increased top margin for subtitles
+  
+  top_h_new <- rownames(confidence_score)[order(apply(confidence_score, 1, max), decreasing=T)[1:min(10, n_targets)]]
+  plot_h_new <- confidence_score[top_h_new, , drop=FALSE]
+  
+  image(1:n_samples, 1:nrow(plot_h_new), t(log1p(plot_h_new)), col=viridis_pal, axes=F)
+  
+  # Main Title & Bootstrap Annotation
+  title(main=paste("UPDATED Heatmap | Ref:", ref_taxon_name), line=3)
+  mtext(sprintf("Denominator selected via Bootstrap Mode (Stability: %.1f%%)", top_ref_pct), 
+        side=3, line=1, cex=0.9, col="darkblue", font=3)
+  
+  axis(1, at=1:n_samples, labels=sample_names, las=2, cex.axis=0.8)
+  axis(2, at=1:nrow(plot_h_new), labels=rownames(plot_h_new), las=1, cex.axis=0.8)
+  
+  # Add RED MARKER
+  m_row_match <- match(m_taxon_name, rownames(plot_h_new))
+  if(!is.na(m_row_match)) points(m_sample_idx, m_row_match, pch=4, col="red", lwd=3, cex=2)
+  
+  # Color scale
+  par(mar = c(7, 1, 6, 4)); zs <- seq(0, max(log1p(plot_h_new)), length.out=100)
+  image(1, zs, matrix(zs, 1), col=viridis_pal, axes=F); axis(4, las=1); mtext("log(Score+1)", 4, 2.5, cex=0.7)
+
+  # --- [UPDATED WINDOW 4] Robust Trends with Bootstrap Annotation ---
+  dev.new(width=12, height=10); par(mfrow=c(3,2), mar=c(4,5,6,2))
+  for(i in 1:min(6, length(top_h_new))) {
+    tn <- top_h_new[i]; y_med <- trend_median[tn, ]; y_sd <- trend_sd[tn, ]
+    plot(y_med, type="n", ylim=range(c(y_med+y_sd, y_med-y_sd, 0)), 
+         main=paste("Target:", tn), xlab="Sample", ylab="Log-Ratio Shift")
+    
+    # Bootstrap Specific Subtitle
+    mtext(paste("Ref Denominator:", ref_taxon_name, "(Bootstrap Mode)"), 
+          side=3, line=0.3, cex=0.7, col="darkblue")
+    
+    polygon(c(1:n_samples, n_samples:1), c(y_med+y_sd, rev(y_med-y_sd)), col=rgb(0.2, 0.4, 0.8, 0.15), border=NA)
+    abline(h=0, lty=2, col="red"); lines(y_med, type="b", pch=19, col="#2c3e50", lwd=2)
+  }
+  
+  cat("SUCCESS: Updated plots with Bootstrap annotations generated.\n")
+} else {
+  cat("\n[INFO] Reference remains unchanged. Original plots are still valid.\n")
+}
