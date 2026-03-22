@@ -687,69 +687,84 @@ if (invariance_ratio < 1.0) {
 cat("==========================================================\n")
 
 # =================================================================
-# PHASE 4: GENERALIZED RELIABILITY & TOTAL LOAD ESTIMATION
+# FINAL GENERALIZED PIPELINE: ANCHOR SELECTION & BIOMASS RECONSTRUCTION
+# Automated Tier-based Reliability Assessment (Based on IR & PI)
 # =================================================================
 
-# --- 1. Variable Assignment ---
-current_sample_names <- rownames(data)
-if(is.null(current_sample_names)) current_sample_names <- paste0("S", 1:nrow(data))
+# --- 1. Automatic Anchor Identification ---
+# Find the taxon with the highest Selection_Score calculated in previous steps
+best_anchor_row <- diagnostic_df[1, ]
+anchor_name     <- as.character(best_anchor_row$Taxon)
+anchor_type     <- best_anchor_row$Type
+inv_ratio       <- invariance_ratio # Theoretical vs Actual Variance
+
+# --- 2. Scaling Calculation (Reciprocal Logic) ---
+current_sample_names  <- rownames(data)
 anchor_relative_abund <- data[, anchor_name]
 
-# --- 2. Scaling Calculation ---
-# Reciprocal of relative abundance vs baseline (Sample 1)
+# Scaling Factor: Reciprocal of relative abundance vs Sample 1 (Baseline)
+# If Anchor % decreases, Total Load is estimated to increase.
 total_load_scaling <- anchor_relative_abund[1] / anchor_relative_abund
 
-# --- 3. Reliability Assessment (Generalized Interpretation) ---
-# Score normalized relative to the Poisson Noise Limit (IR=1)
-reliability_score <- 100 / (1 + (invariance_ratio / 1))
+# Normalized Reliability Score (IR=1.0 is the 50/100 pivot point)
+reliability_score <- 100 / (1 + (inv_ratio / 1))
 
-# --- 4. OUTPUT: Numerical Summary ---
+# --- 3. NUMERICAL OUTPUT: Total Load Summary ---
 cat("\n==========================================================\n")
-cat("      ESTIMATED TOTAL BIOMASS SCALING (NUMERICAL)         \n")
+cat("      PHASE 4: ESTIMATED TOTAL BIOMASS SCALING            \n")
 cat("==========================================================\n")
 total_load_summary <- data.frame(
   Sample_Name      = current_sample_names,
-  Anchor_Rel_Pct   = round(anchor_relative_abund * 100, 4),
+  Anchor_Rel_Pct   = round(anchor_relative_abund * 100, 6),
   Scaling_Factor   = round(total_load_scaling, 4),
   Log2_Total_Shift = round(log2(total_load_scaling), 4)
 )
 print(total_load_summary)
 cat("----------------------------------------------------------\n")
-cat(sprintf("MAX/MIN TOTAL VARIATION : %.4f x\n", max(total_load_scaling) / min(total_load_scaling)))
+cat(sprintf("MAX/MIN BIOMASS VARIATION : %.4f x\n", max(total_load_scaling) / min(total_load_scaling)))
 
-# --- 5. GENERALIZED RELIABILITY ANNOTATIONS ---
+# --- 4. GENERALIZED MULTI-TIER RELIABILITY REPORT ---
 cat("\n==========================================================\n")
 cat("             GENERALIZED RELIABILITY REPORT               \n")
 cat("==========================================================\n")
 cat(sprintf("Selected Anchor         : %s\n", anchor_name))
-cat(sprintf("Invariance Ratio (IR)   : %.4f\n", invariance_ratio))
+cat(sprintf("Anchor Classification   : [%s]\n", anchor_type))
+cat(sprintf("Invariance Ratio (IR)   : %.4f\n", inv_ratio))
 cat(sprintf("Analytical Reliability  : %.1f / 100\n", reliability_score))
 cat("----------------------------------------------------------\n")
 
-if (invariance_ratio < 1.5) {
-  cat("INTERPRETATION: [High-Precision Physical Reference]\n")
-  cat("The anchor's stability reaches the physical sampling limit.\n")
-  cat("The estimated scaling factors represent near-absolute biomass.\n")
-} else if (invariance_ratio < 10.0) {
-  cat("INTERPRETATION: [Reliable Comparative Reference]\n")
-  cat("The anchor shows dominant stability over biological noise.\n")
-  cat("Calculated shifts reflect robust trends in total community load.\n")
+# Tier Logic based on IR (Physical Noise Limit)
+if (inv_ratio < 1.0) {
+  tier_label <- "Tier 1: ULTRA-STABLE"
+  cat("INTERPRETATION: [Tier 1: ULTRA-STABLE ANCHOR]\n")
+  cat("Observed variance is LOWER than the Poisson noise limit.\n")
+  cat("Acts as a physical constant; Scaling reflects near-absolute biomass.\n")
+} else if (inv_ratio < 2.5) {
+  tier_label <- "Tier 2: PHYSICALLY RELIABLE"
+  cat("INTERPRETATION: [Tier 2: PHYSICALLY RELIABLE]\n")
+  cat("Stability is close to the physical sampling limit.\n")
+  cat("Fluctuations are dominated by stochasticity, not biological noise.\n")
+} else if (inv_ratio < 10.0) {
+  tier_label <- "Tier 3: PRACTICAL INVARIANT"
+  cat("INTERPRETATION: [Tier 3: PRACTICAL INVARIANT]\n")
+  cat("Minor biological dynamics present, but remains the most stable\n")
+  cat("reference in the set. Reliable for detecting major biomass shifts.\n")
 } else {
-  cat("INTERPRETATION: [Relative Baseline Reference]\n")
-  cat(sprintf("The anchor exhibits internal dynamics (IR=%.2f).\n", invariance_ratio))
-  cat("While mathematically the most stable in this set, its own\n")
-  cat("biological fluctuation may slightly bias the scaling factors.\n")
-  cat("Interpret as 'Estimated Relative Biomass' vs this anchor.\n")
+  tier_label <- "Tier 4: RELATIVE BASELINE"
+  cat("INTERPRETATION: [Tier 4: RELATIVE BASELINE REFERENCE]\n")
+  cat(sprintf("Significant internal dynamics detected (IR=%.2f).\n", inv_ratio))
+  cat("Interpret as 'Relative Biomass Shift' anchored to this specific taxon.\n")
+  cat("Caution: Scaling may be biased by the anchor's own biological noise.\n")
 }
 cat("==========================================================\n")
 
-# --- 6. VISUALIZATION ---
+# --- 5. VISUALIZATION ---
 dev.new(width=12, height=6); par(mar=c(6, 5, 5, 2))
 colors <- ifelse(total_load_scaling >= 1, "#2ecc71", "#e74c3c")
 bp <- barplot(total_load_scaling, names.arg=current_sample_names, 
               col=colors, border="#2c3e50", las=2, cex.names=0.8,
-              main=paste("Estimated Total Load Scaling\nReliability Score:", round(reliability_score, 1)),
+              main=paste("Estimated Total Load Scaling\nReliability:", tier_label),
               ylab="Total Load Scaling Factor (vs Baseline)",
               ylim=c(0, max(total_load_scaling) * 1.2))
-abline(h=1, col="blue", lwd=2, lty=2)
+abline(h=1, col="blue", lwd=2, lty=2); grid(nx=NA, ny=NULL, col="gray", lty="dotted")
 text(bp, total_load_scaling, round(total_load_scaling, 2), pos=3, cex=0.7)
