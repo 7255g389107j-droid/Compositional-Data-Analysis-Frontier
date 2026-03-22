@@ -631,3 +631,57 @@ for(i in 1:min(6, length(top_h_taxa))) {
 }
 
 cat("\nSUCCESS: All visualizations (Fig 3 & 4) and Robustness Reports generated.\n")
+
+# =================================================================
+# STATISTICAL FLOOR ANALYSIS: INVARIANCE VALIDATION VIA COUNTS
+# Goal: Prove the anchor is more stable than the theoretical noise limit.
+# =================================================================
+
+# 1. Estimate Theoretical Shot Noise (Poisson Limit)
+# For counts, the theoretical minimum variance equals the mean (Var = Mean).
+# In log-space, the variance of log(counts) is approximately 1/Mean.
+
+raw_counts <- Dataset[, valid_taxa_mask] # Use original raw counts
+mean_counts <- colMeans(raw_counts)
+
+# Theoretical Variance Floor (Log-scale approximation)
+# This is the "noise" we expect just from random sampling.
+theo_variance_floor <- 1 / (mean_counts + 1e-6)
+
+# 2. Compare Actual VLR-based Variance with the Floor
+# actual_self_variance was calculated earlier (diag_vec)
+anchor_idx <- which(taxa_names == anchor_name)
+actual_var <- diag_vec[anchor_idx]
+expected_floor <- theo_variance_floor[anchor_idx]
+
+# Invariance Ratio (IR): Actual Variance / Theoretical Floor
+# IR < 1 means the anchor is "Ultra-Stable" (more stable than random sampling noise).
+invariance_ratio <- actual_var / expected_floor
+
+# 3. REPORT: STATISTICAL FLOOR VALIDATION
+cat("\n==========================================================\n")
+cat("      PHASE 3: STATISTICAL FLOOR & INVARIANCE PROOF       \n")
+cat("==========================================================\n")
+cat(sprintf("Selected Anchor        : %s\n", anchor_name))
+cat(sprintf("Mean Raw Counts        : %.2f\n", mean_counts[anchor_idx]))
+cat("----------------------------------------------------------\n")
+cat(sprintf("Theoretical Noise Floor: %.6f (Poisson Limit)\n", expected_floor))
+cat(sprintf("Actual Observed Var    : %.6f (Log-scale)\n", actual_var))
+cat(sprintf("Invariance Ratio (IR)  : %.4f\n", invariance_ratio))
+cat("----------------------------------------------------------\n")
+
+if (invariance_ratio < 1.0) {
+  cat("CONCLUSION: [ULTRA-STABLE ANCHOR]\n")
+  cat("RATIONALE: The observed variance is LOWER than the theoretical\n")
+  cat("           sampling noise. This indicates a physical or technical\n")
+  cat("           constancy that defies random fluctuation.\n")
+} else if (invariance_ratio < 2.0) {
+  cat("CONCLUSION: [STATISTICALLY RELIABLE ANCHOR]\n")
+  cat("RATIONALE: Observed variance is close to the theoretical limit.\n")
+  cat("           It is as stable as a counting process can physically be.\n")
+} else {
+  cat("CONCLUSION: [STOCHASTIC ANCHOR]\n")
+  cat("RATIONALE: Observed variance exceeds the sampling floor. While\n")
+  cat("           relatively stable, it still possesses internal dynamics.\n")
+}
+cat("==========================================================\n")
