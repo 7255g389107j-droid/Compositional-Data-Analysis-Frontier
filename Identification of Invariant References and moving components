@@ -150,3 +150,23 @@ for(i in 1:min(6, length(top_h))) {
   polygon(c(1:n_samples, n_samples:1), c(y_med+y_sd, rev(y_med-y_sd)), col=rgb(0.2, 0.4, 0.8, 0.15), border=NA)
   abline(h=0, lty=2, col="red"); lines(y_med, type="b", pch=19, col="#2c3e50", lwd=2)
 }
+
+# --- 6. Bootstrap Validation of Reference (Robustness Check) ---
+n_boot <- 10000
+boot_refs <- character(n_boot)
+
+for(b in 1:n_boot) {
+  idx <- sample(1:n_samples, replace = TRUE)
+  ds_boot <- data[idx, ]
+  # VLR & Win Count inside bootstrap
+  cov_b <- var(log(ds_boot))
+  diag_b <- diag(cov_b)
+  vlr_b <- outer(diag_b, diag_b, "+") - 2 * cov_b
+  # Simplified Score
+  score_b <- rank(diag_b) 
+  boot_refs[b] <- taxa_names[which.min(score_b)]
+}
+
+ref_stability <- table(boot_refs) / n_boot
+cat("\n=== Reference Stability (Bootstrap) ===\n")
+print(ref_stability)
