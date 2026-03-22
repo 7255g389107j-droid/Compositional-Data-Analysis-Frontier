@@ -151,22 +151,60 @@ for(i in 1:min(6, length(top_h))) {
   abline(h=0, lty=2, col="red"); lines(y_med, type="b", pch=19, col="#2c3e50", lwd=2)
 }
 
-# --- 6. Bootstrap Validation of Reference (Robustness Check) ---
-n_boot <- 10000
+# --- 6. Bootstrap Stability (Text-Only Report) ---
+n_boot <- 1000
 boot_refs <- character(n_boot)
 
 for(b in 1:n_boot) {
   idx <- sample(1:n_samples, replace = TRUE)
-  ds_boot <- data[idx, ]
-  # VLR & Win Count inside bootstrap
-  cov_b <- var(log(ds_boot))
-  diag_b <- diag(cov_b)
-  vlr_b <- outer(diag_b, diag_b, "+") - 2 * cov_b
-  # Simplified Score
-  score_b <- rank(diag_b) 
-  boot_refs[b] <- taxa_names[which.min(score_b)]
+  ds_b <- data[idx, ]
+  # Pure VLR focus for internal stability check
+  diag_b <- apply(log(ds_b), 2, var)
+  boot_refs[b] <- taxa_names[which.min(diag_b)]
 }
 
-ref_stability <- table(boot_refs) / n_boot
-cat("\n=== Reference Stability (Bootstrap) ===\n")
-print(ref_stability)
+# Calculate selection frequency as percentage
+ref_stability_tbl <- table(boot_refs) / n_boot * 100
+ref_stability_sorted <- sort(ref_stability_tbl, decreasing = TRUE)
+
+# 1. ACTUAL Adopted Reference Metrics
+actual_ref_pct <- if(ref_taxon_name %in% names(ref_stability_tbl)) {
+  as.numeric(ref_stability_tbl[ref_taxon_name])
+} else {
+  0
+}
+
+# 2. STATISTICAL Mode (Most Stable Taxon by Bootstrap)
+top_ref_name <- names(ref_stability_sorted)[1]
+top_ref_pct  <- as.numeric(ref_stability_sorted[1])
+
+# --- Final Reliability Analysis Report ---
+cat("\n==========================================\n")
+cat("       RELIABILITY ANALYSIS REPORT        \n")
+cat("==========================================\n")
+cat(sprintf("Most Stable Taxon (Mode): %s\n", top_ref_name))
+cat(sprintf("Selection Probability   : %.1f%%\n", top_ref_pct))
+cat("------------------------------------------\n")
+cat("Top Stability Candidates (Bootstrap):\n")
+print(head(ref_stability_sorted, 3))
+cat("==========================================\n")
+
+# --- Final Conclusion (Robustness Analysis) ---
+cat("\n=== Final Conclusion (Robustness Analysis) ===\n")
+cat(paste0("Adopted Invariant Reference: ", ref_taxon_name, " (Bootstrap Support: ", actual_ref_pct, "%)\n"))
+cat(paste0("Taxon with most certain fluctuation (vs Ref): ", m_taxon_name, "\n"))
+cat(paste0("Sample with maximum confidence: ", m_sample_name, " (Index: ", m_sample_idx, ")\n"))
+
+# --- CRITICAL WARNINGS ---
+# Warning 1: Selection Mismatch (Adopted vs Bootstrap Mode)
+if(ref_taxon_name != top_ref_name) {
+  cat(sprintf("\n[CRITICAL WARNING] REFERENCE MISMATCH!\n"))
+  cat(sprintf("Adopted [%s] differs from the Bootstrap Mode [%s].\n", ref_taxon_name, top_ref_name))
+  cat("This suggests the choice of reference is sensitive to specific samples.\n")
+}
+
+# Warning 2: Low Stability
+if(actual_ref_pct < 50) {
+  cat("\n[NOTICE] The adopted reference has low bootstrap stability (<50%).\n")
+  cat("Interpret fluctuations with caution due to potential Compositional Bias.\n")
+}
