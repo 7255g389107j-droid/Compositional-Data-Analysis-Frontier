@@ -3,6 +3,15 @@
 # Methodology: VLR (Log-Ratio Variance) + CV Asymmetry Analysis
 # Features: Red Marker, Viridis Heatmap, Explicit Sample Extraction
 # Engine: Pure Base R (No External Libraries)
+# Developed by: Tatsuki Itagaki
+# Copyright (c) 2026 Tatsuki Itagaki
+# License: MIT License (https://opensource.org)
+# 
+# ACADEMIC CITATION:
+# If you use this software or its logic in your research, 
+# please cite the following works:
+# Ohta, T. (2011). DOI: 10.1007/s11004-011-9332-y
+# Itagaki, T (2026). DOI: 10.13140/RG.2.2.21953.93284
 # =================================================================
 
 # --- 1. User Configuration & Data Cleaning ---
